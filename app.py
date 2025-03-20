@@ -43,7 +43,7 @@ else:
         days = int(day_range.split()[0])
 
     # ✅ New Filter: CLOSE_PRICE Filter
-    close_price_filter = st.sidebar.text_input("Filter by CLOSE_PRICE (<=)", "200")
+    close_price_filter = st.sidebar.text_input("Filter by CLOSE_PRICE (<=)", "90")
 
     # ✅ Apply Filters
     df_filtered = df.copy()
