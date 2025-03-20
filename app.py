@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 # ✅ Load merged CSV file
 merged_file_path = "output/merged_output.csv"
 
-st.title("📊 Options Data Analyzer Tool")
+st.title("📊 Equity Data Analyzer Tool")
 
 # ✅ Check if the merged CSV exists
 if not os.path.exists(merged_file_path):
@@ -24,11 +24,14 @@ else:
     df['DATE'] = pd.to_datetime(df['DATE'], format='%d-%b-%Y', errors='coerce')
 
     # ✅ Streamlit UI for Analysis
-    #st.title("📈 Options Price Gain Tracker")
+    #st.title("📈 Equity Price Gain Tracker")
 
     # ✅ Sidebar Filters
     security = st.sidebar.selectbox("Select Security", ["All"] + list(df['SECURITY'].unique()))
     gain_threshold = st.sidebar.slider("Gain % Threshold", min_value=1, max_value=100, value=1, step=1)
+
+    # ✅ New Filter: Starts With
+    security_type = st.sidebar.selectbox("Select Security Type", ["Nifty", "2.5%", "Others", "NONE"], index=2)
 
     # ✅ Day Range Selection
     day_range = st.sidebar.selectbox("Select Day Range", ["1 Day", "2 Days", "3 Days", "Custom"])
@@ -39,11 +42,31 @@ else:
     else:
         days = int(day_range.split()[0])
 
+    # ✅ New Filter: CLOSE_PRICE Filter
+    close_price_filter = st.sidebar.text_input("Filter by CLOSE_PRICE (<=)", "200")
+
     # ✅ Apply Filters
     df_filtered = df.copy()
 
+    # ✅ Apply Security Type Filter
+    if security_type != "NONE":
+        if security_type == "Nifty":
+            df_filtered = df_filtered[df_filtered['SECURITY'].str.startswith("Nifty", na=False)]
+        elif security_type == "2.5%":
+            df_filtered = df_filtered[df_filtered['SECURITY'].str.startswith("2.5", na=False)]
+        elif security_type == "Others":
+            df_filtered = df_filtered[~df_filtered['SECURITY'].str.startswith(("Nifty", "2.5"), na=False)]
+
     if security != "All":
         df_filtered = df_filtered[df_filtered['SECURITY'] == security]
+
+    # ✅ Apply CLOSE_PRICE Filter
+    if close_price_filter:
+        try:
+            close_price_value = float(close_price_filter)
+            df_filtered = df_filtered[df_filtered['CLOSE_PRICE'] >= close_price_value]
+        except ValueError:
+            st.warning("Please enter a valid numeric value for CLOSE_PRICE filter")
 
     # ✅ Function to calculate day-wise gain
     def calculate_daywise_gain(df, days):
@@ -90,7 +113,7 @@ else:
         df_final_filtered,
         x='SECURITY',
         y='GAIN_PERCENT',
-        title=f"Options with High Gains over {days} Days",
+        title=f"Equities with High Gains over {days} Days",
         hover_data=['LOW_PRICE', 'CLOSE_PRICE']
     )
     st.plotly_chart(fig)
