@@ -4,8 +4,9 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 
-# ✅ Load merged CSV file
+# ✅ File paths
 merged_file_path = "output/merged_output.csv"
+fno_file_path = "data/FO_SECURITY.xlsx"  # F&O securities file
 
 st.title("📊 Equity Data Analyzer Tool")
 
@@ -13,7 +14,21 @@ st.title("📊 Equity Data Analyzer Tool")
 if not os.path.exists(merged_file_path):
     st.error("❌ Merged CSV not found. Please run the ZIP merger tool first.")
 else:
+    # ✅ Load the main data
     df = pd.read_csv(merged_file_path)
+
+    # ✅ Load F&O Securities
+    if os.path.exists(fno_file_path):
+        df_fno = pd.read_excel(fno_file_path)
+
+        # ✅ Extract first word safely and handle NaN values
+        #df_fno['FIRST_WORD'] = df_fno['SECURITY'].str.split().str[0].str.upper().str.strip().fillna('')
+        df_fno['FIRST_WORD'] = df_fno['SECURITY'].str.split().str[0].str.upper().str.strip()
+        fno_list = df_fno['FIRST_WORD'].tolist()
+
+    else:
+        st.error("❌ F&O securities file not found.")
+        fno_list = []
 
     # ✅ Clean and Prepare Data
     df = df.dropna(subset=['LOW_PRICE', 'HIGH_PRICE', 'CLOSE_PRICE', 'OPEN_PRICE', 'DATE'])
@@ -23,10 +38,23 @@ else:
     df['HIGH_PRICE'] = pd.to_numeric(df['HIGH_PRICE'], errors='coerce')
     df['DATE'] = pd.to_datetime(df['DATE'], format='%d-%b-%Y', errors='coerce')
 
-    # ✅ Streamlit UI for Analysis
-    #st.title("📈 Equity Price Gain Tracker")
+    # ✅ Extract first word safely in the main dataset
+    df['FIRST_WORD'] = df['SECURITY'].str.split().str[0].str.upper().str.strip().fillna('')
 
-    # ✅ Sidebar Filters
+    # ✅ Filter by first-word with partial matching
+    def filter_first_word_partial(df, fno_list):
+        """Filter dataframe by partial first-word match."""
+        if not fno_list:
+            return df
+
+        # Efficient partial matching
+        mask = df['FIRST_WORD'].apply(lambda x: any(fno in x for fno in fno_list))
+        return df[mask]
+
+    # ✅ Apply the first-word matching filter
+    df = filter_first_word_partial(df, fno_list)
+
+    # ✅ Streamlit UI for Analysis
     security = st.sidebar.selectbox("Select Security", ["All"] + list(df['SECURITY'].unique()))
     gain_threshold = st.sidebar.slider("Gain % Threshold", min_value=1, max_value=100, value=1, step=1)
 
@@ -75,19 +103,16 @@ else:
 
         gain_data = []
 
-        # Group by Security
         for sec, group in df_sorted.groupby(['SECURITY']):
             group = group.reset_index(drop=True)
 
-            # ✅ Use overall low price if no day filter is applied
             if len(group) >= days:
                 low_price = group.iloc[-days]['LOW_PRICE']
             else:
-                low_price = group['LOW_PRICE'].iloc[0]  # Fallback to first row if N days not available
+                low_price = group['LOW_PRICE'].iloc[0]
 
-            close_price = group['CLOSE_PRICE'].iloc[-1]  # Latest close price
+            close_price = group['CLOSE_PRICE'].iloc[-1]
 
-            # ✅ Calculate gain percent
             gain_percent = ((close_price - low_price) / low_price) * 100 if low_price != 0 else 0
 
             gain_data.append({
