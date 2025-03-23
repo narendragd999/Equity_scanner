@@ -12,6 +12,7 @@ source_folder = "zip"
 output_folder = "output"
 merged_file_path = os.path.join(output_folder, "merged_output.csv")
 fno_file_path = "data/FO_SECURITY.xlsx"  # F&O securities file
+tickers_file_path = "data/tickers.csv"  # New tickers file for SYMBOL matching
 
 # Ensure directories exist
 os.makedirs(source_folder, exist_ok=True)
@@ -52,7 +53,7 @@ def process_zip_files():
                         df = pd.read_csv(file_path)
                         
                         # Apply logic: Remove columns A, B, C and J to P
-                        df.drop(df.columns[[0, 1, 2] + list(range(9, 16))], axis=1, inplace=True)
+                        df.drop(df.columns[[0, 1] + list(range(9, 16))], axis=1, inplace=True)
                         
                         # Add DATE column
                         df["DATE"] = formatted_date
@@ -113,14 +114,26 @@ def run_app():
         st.error("❌ F&O securities file not found.")
         fno_list = []
 
+    # Load tickers.csv for SYMBOL matching
+    ticker_symbols = []
+    if os.path.exists(tickers_file_path):
+        df_tickers = pd.read_csv(tickers_file_path)
+        if 'SYMBOL' in df_tickers.columns:
+            ticker_symbols = df_tickers['SYMBOL'].str.upper().str.strip().tolist()
+        else:
+            st.warning("⚠️ 'SYMBOL' column not found in tickers.csv")
+    else:
+        st.warning("⚠️ tickers.csv file not found at data/tickers.csv")
+
     # Clean and Prepare Data
-    df = df.dropna(subset=['LOW_PRICE', 'HIGH_PRICE', 'CLOSE_PRICE', 'OPEN_PRICE', 'DATE'])
+    df = df.dropna(subset=['LOW_PRICE', 'HIGH_PRICE', 'CLOSE_PRICE', 'OPEN_PRICE', 'DATE', 'SYMBOL'])
     df['CLOSE_PRICE'] = pd.to_numeric(df['CLOSE_PRICE'], errors='coerce')
     df['OPEN_PRICE'] = pd.to_numeric(df['OPEN_PRICE'], errors='coerce')
     df['LOW_PRICE'] = pd.to_numeric(df['LOW_PRICE'], errors='coerce')
     df['HIGH_PRICE'] = pd.to_numeric(df['HIGH_PRICE'], errors='coerce')
     df['DATE'] = pd.to_datetime(df['DATE'], format='%d-%b-%Y', errors='coerce')
     df['FIRST_WORD'] = df['SECURITY'].str.split().str[0].str.upper().str.strip().fillna('')
+    df['SYMBOL'] = df['SYMBOL'].astype(str).str.upper().str.strip()
 
     # Filter by first-word with partial matching
     def filter_first_word_partial(df, fno_list):
@@ -132,10 +145,13 @@ def run_app():
     df = filter_first_word_partial(df, fno_list)
 
     # Sidebar Filters
+    st.sidebar.header("Filters")
     security = st.sidebar.selectbox("Select Security", ["All"] + list(df['SECURITY'].unique()))
+    symbol_filter = st.sidebar.selectbox("Select SYMBOL", ["All"] + list(df['SYMBOL'].unique()))
     gain_threshold = st.sidebar.slider("Gain % Threshold", min_value=1, max_value=100, value=1, step=1)
     security_type = st.sidebar.selectbox("Select Security Type", ["Nifty", "2.5%", "Others", "NONE"], index=3)
     day_range = st.sidebar.selectbox("Select Day Range", ["1 Day", "2 Days", "3 Days", "Custom"])
+    show_fno_only = st.sidebar.checkbox("Show only F&O Securities (match SYMBOL with tickers.csv)", value=False)
     
     if day_range == "Custom":
         custom_days = st.sidebar.number_input("Enter Custom Days", min_value=1, max_value=30, value=5)
@@ -159,6 +175,12 @@ def run_app():
     if security != "All":
         df_filtered = df_filtered[df_filtered['SECURITY'] == security]
 
+    if symbol_filter != "All":
+        df_filtered = df_filtered[df_filtered['SYMBOL'] == symbol_filter]
+
+    if show_fno_only and ticker_symbols:
+        df_filtered = df_filtered[df_filtered['SYMBOL'].isin(ticker_symbols)]
+
     if close_price_filter:
         try:
             close_price_value = float(close_price_filter)
@@ -178,19 +200,27 @@ def run_app():
                 low_price = group['LOW_PRICE'].iloc[0]
             close_price = group['CLOSE_PRICE'].iloc[-1]
             gain_percent = ((close_price - low_price) / low_price) * 100 if low_price != 0 else 0
+            symbol = group['SYMBOL'].iloc[-1]
             gain_data.append({
                 'SECURITY': sec,
+                'SYMBOL': symbol,
                 'LOW_PRICE': low_price,
                 'CLOSE_PRICE': close_price,
                 'GAIN_PERCENT': gain_percent
             })
         return pd.DataFrame(gain_data)
 
+    # Calculate gains based on filtered data
     df_daywise = calculate_daywise_gain(df_filtered, days)
     df_final_filtered = df_daywise[df_daywise['GAIN_PERCENT'] >= gain_threshold]
 
-    # Display Table
-    st.dataframe(df_final_filtered[['SECURITY', 'LOW_PRICE', 'CLOSE_PRICE', 'GAIN_PERCENT']])
+    # Add Serial Number column after all filters are applied
+    # This ensures S.No is serialized based on the final filtered data
+    df_final_filtered = df_final_filtered.reset_index(drop=True)  # Reset index to start from 0
+    df_final_filtered.insert(0, 'S.No', range(1, len(df_final_filtered) + 1))  # Add S.No starting from 1
+
+    # Display Table with Serial Number included
+    st.dataframe(df_final_filtered[['S.No', 'SECURITY', 'SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE', 'GAIN_PERCENT']])
 
     # Plot Bar Chart
     fig = px.bar(
@@ -198,7 +228,7 @@ def run_app():
         x='SECURITY',
         y='GAIN_PERCENT',
         title=f"Equities with High Gains over {days} Days",
-        hover_data=['LOW_PRICE', 'CLOSE_PRICE']
+        hover_data=['SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE']
     )
     st.plotly_chart(fig)
 

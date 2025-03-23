@@ -48,7 +48,7 @@ for zip_file in os.listdir(source_folder):
                     df = pd.read_csv(file_path)
                     
                     # Apply script logic: Remove columns A, B, C and J to P
-                    df.drop(df.columns[[0, 1, 2] + list(range(9, 16))], axis=1, inplace=True)
+                    df.drop(df.columns[[0, 1] + list(range(9, 16))], axis=1, inplace=True)
                     
                     # Add DATE column
                     df["DATE"] = formatted_date
