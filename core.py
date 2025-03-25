@@ -144,14 +144,19 @@ def run_app():
 
     df = filter_first_word_partial(df, fno_list)
 
+    # Calculate the most recent OPEN_PRICE for each SYMBOL
+    df_sorted_by_date = df.sort_values('DATE')
+    yesterday_open_price = df_sorted_by_date.groupby('SYMBOL')['OPEN_PRICE'].last().reset_index()
+    yesterday_open_price.rename(columns={'OPEN_PRICE': 'YESTERDAY_OPEN_PRICE'}, inplace=True)
+
     # Sidebar Filters
     st.sidebar.header("Filters")
     security = st.sidebar.selectbox("Select Security", ["All"] + list(df['SECURITY'].unique()))
     symbol_filter = st.sidebar.selectbox("Select SYMBOL", ["All"] + list(df['SYMBOL'].unique()))
-    gain_threshold = st.sidebar.slider("Gain % Threshold", min_value=1, max_value=100, value=1, step=1)
+    gain_threshold = st.sidebar.slider("Gain % Threshold", min_value=1, max_value=100, value=15, step=1)
     security_type = st.sidebar.selectbox("Select Security Type", ["Nifty", "2.5%", "Others", "NONE"], index=3)
-    day_range = st.sidebar.selectbox("Select Day Range", ["1 Day", "2 Days", "3 Days", "Custom"])
-    show_fno_only = st.sidebar.checkbox("Show only F&O Securities (match SYMBOL with tickers.csv)", value=False)
+    day_range = st.sidebar.selectbox("Select Day Range", ["1 Day", "2 Days", "3 Days", "Custom"], index=3)
+    show_fno_only = st.sidebar.checkbox("Show only F&O Securities (match SYMBOL with tickers.csv)", value=True)
     
     if day_range == "Custom":
         custom_days = st.sidebar.number_input("Enter Custom Days", min_value=1, max_value=30, value=5)
@@ -214,13 +219,15 @@ def run_app():
     df_daywise = calculate_daywise_gain(df_filtered, days)
     df_final_filtered = df_daywise[df_daywise['GAIN_PERCENT'] >= gain_threshold]
 
-    # Add Serial Number column after all filters are applied
-    # This ensures S.No is serialized based on the final filtered data
-    df_final_filtered = df_final_filtered.reset_index(drop=True)  # Reset index to start from 0
-    df_final_filtered.insert(0, 'S.No', range(1, len(df_final_filtered) + 1))  # Add S.No starting from 1
+    # Merge with yesterday_open_price to add YESTERDAY_OPEN_PRICE column
+    df_final_filtered = df_final_filtered.merge(yesterday_open_price, on='SYMBOL', how='left')
 
-    # Display Table with Serial Number included
-    st.dataframe(df_final_filtered[['S.No', 'SECURITY', 'SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE', 'GAIN_PERCENT']])
+    # Add Serial Number column after all filters are applied
+    df_final_filtered = df_final_filtered.reset_index(drop=True)
+    df_final_filtered.insert(0, 'S.No', range(1, len(df_final_filtered) + 1))
+
+    # Display Table with YESTERDAY_OPEN_PRICE included
+    st.dataframe(df_final_filtered[['S.No', 'SECURITY', 'SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE', 'YESTERDAY_OPEN_PRICE', 'GAIN_PERCENT']])
 
     # Plot Bar Chart
     fig = px.bar(
@@ -228,7 +235,7 @@ def run_app():
         x='SECURITY',
         y='GAIN_PERCENT',
         title=f"Equities with High Gains over {days} Days",
-        hover_data=['SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE']
+        hover_data=['SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE', 'YESTERDAY_OPEN_PRICE']
     )
     st.plotly_chart(fig)
 
