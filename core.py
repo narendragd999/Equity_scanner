@@ -68,7 +68,49 @@ def process_zip_files():
         return True, f"✅ Merged CSV saved at: {merged_file_path}", final_df
     return False, "No valid CSV files found for processing.", None
 
-# Streamlit App (app.py + bhav.py combined)
+# Function to calculate continuous green candles percentage gain from lowest point
+def calculate_continuous_gain(df, days=5):
+    df_sorted = df.sort_values(['SYMBOL', 'DATE'])
+    continuous_gain_data = {}
+    
+    for symbol, group in df_sorted.groupby('SYMBOL'):
+        # Get the last 5 days of data (or less if not available)
+        group = group.tail(days)
+        if len(group) < 2:  # Need at least 2 days to compare
+            continuous_gain_data[symbol] = 0.0
+            continue
+            
+        # Check continuous gains and calculate percentage from lowest point
+        closes = group['CLOSE_PRICE'].values
+        lows = group['OPEN_PRICE'].values
+        is_continuous_gain = True
+        start_idx = 0
+        
+        # Find the last sequence of continuous gains
+        for i in range(1, len(closes)):
+            if closes[i] <= closes[i-1]:
+                is_continuous_gain = False
+                start_idx = i
+                break
+        
+        if is_continuous_gain and len(closes) > 1:
+            # If all days are continuous gains, use the lowest low price
+            lowest_price = min(lows)
+            latest_close = closes[-1]
+            gain_percent = ((latest_close - lowest_price) / lowest_price) * 100 if lowest_price != 0 else 0.0
+            continuous_gain_data[symbol] = round(gain_percent, 2)
+        elif start_idx < len(closes) - 1:
+            # Calculate gain from the low of the first candle in the last continuous sequence
+            lowest_price = min(lows[start_idx:])
+            latest_close = closes[-1]
+            gain_percent = ((latest_close - lowest_price) / lowest_price) * 100 if lowest_price != 0 else 0.0
+            continuous_gain_data[symbol] = round(gain_percent, 2)
+        else:
+            continuous_gain_data[symbol] = 0.0
+    
+    return continuous_gain_data
+
+# Streamlit App
 def run_app():
     st.title("📊 Equity Data Analyzer Tool")
 
@@ -153,10 +195,10 @@ def run_app():
     st.sidebar.header("Filters")
     security = st.sidebar.selectbox("Select Security", ["All"] + list(df['SECURITY'].unique()))
     symbol_filter = st.sidebar.selectbox("Select SYMBOL", ["All"] + list(df['SYMBOL'].unique()))
-    gain_threshold = st.sidebar.slider("Gain % Threshold", min_value=1, max_value=100, value=15, step=1)
+    gain_threshold = st.sidebar.slider("Gain % Threshold", min_value=1, max_value=100, value=1, step=1)
     security_type = st.sidebar.selectbox("Select Security Type", ["Nifty", "2.5%", "Others", "NONE"], index=3)
     day_range = st.sidebar.selectbox("Select Day Range", ["1 Day", "2 Days", "3 Days", "Custom"], index=3)
-    show_fno_only = st.sidebar.checkbox("Show only F&O Securities (match SYMBOL with tickers.csv)", value=True)
+    show_fno_only = st.sidebar.checkbox("Show only F&O Securities (match SYMBOL with tickers.csv)", value=False)
     
     if day_range == "Custom":
         custom_days = st.sidebar.number_input("Enter Custom Days", min_value=1, max_value=30, value=5)
@@ -164,7 +206,7 @@ def run_app():
     else:
         days = int(day_range.split()[0])
 
-    close_price_filter = st.sidebar.text_input("Filter by CLOSE_PRICE (>=)", "90")
+    close_price_filter = st.sidebar.text_input("Filter by CLOSE_PRICE (>=)", "10")
 
     # Apply Filters
     df_filtered = df.copy()
@@ -219,15 +261,24 @@ def run_app():
     df_daywise = calculate_daywise_gain(df_filtered, days)
     df_final_filtered = df_daywise[df_daywise['GAIN_PERCENT'] >= gain_threshold]
 
-    # Merge with yesterday_open_price to add YESTERDAY_OPEN_PRICE column
+    # Merge with yesterday_open_price
     df_final_filtered = df_final_filtered.merge(yesterday_open_price, on='SYMBOL', how='left')
-
+    
+    # Calculate continuous gains as percentage
+    continuous_gains = calculate_continuous_gain(df_filtered)
+    
+    # Add continuous gain as a new column
+    df_final_filtered['CONTINUOUS_GAIN'] = df_final_filtered['SYMBOL'].map(continuous_gains)
+    
     # Add Serial Number column after all filters are applied
     df_final_filtered = df_final_filtered.reset_index(drop=True)
     df_final_filtered.insert(0, 'S.No', range(1, len(df_final_filtered) + 1))
 
-    # Display Table with YESTERDAY_OPEN_PRICE included
-    st.dataframe(df_final_filtered[['S.No', 'SECURITY', 'SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE', 'YESTERDAY_OPEN_PRICE', 'GAIN_PERCENT']])
+    # Display Table with CONTINUOUS_GAIN included
+    st.dataframe(df_final_filtered[[
+        'S.No', 'SECURITY', 'SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE', 
+        'YESTERDAY_OPEN_PRICE', 'GAIN_PERCENT', 'CONTINUOUS_GAIN'
+    ]])
 
     # Plot Bar Chart
     fig = px.bar(
@@ -235,7 +286,7 @@ def run_app():
         x='SECURITY',
         y='GAIN_PERCENT',
         title=f"Equities with High Gains over {days} Days",
-        hover_data=['SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE', 'YESTERDAY_OPEN_PRICE']
+        hover_data=['SYMBOL', 'LOW_PRICE', 'CLOSE_PRICE', 'YESTERDAY_OPEN_PRICE', 'CONTINUOUS_GAIN']
     )
     st.plotly_chart(fig)
 
